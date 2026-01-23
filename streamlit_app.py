@@ -308,7 +308,10 @@ def get_trading_signal(df):
 # ==============================
 
 st.title("📈 Crypto Paper Trading")
-st.caption("실시간 분석 + 모의 거래 • BTC, ETH, SOL, XRP, DOGE, BNB")
+if auto_trade:
+    st.caption("🤖 **AUTO TRADE 모드** | 시그널에 따라 자동 거래 중...")
+else:
+    st.caption("실시간 분석 + 모의 거래 • BTC, ETH, SOL, XRP, DOGE, BNB")
 
 # Supabase 연결 확인
 if not supabase:
@@ -323,6 +326,17 @@ period_map = {"1일": ("1d", "1m"), "5일": ("5d", "5m"), "1개월": ("1mo", "1h
 selected_period = st.sidebar.selectbox("⏱️ Period", list(period_map.keys()))
 period, interval = period_map[selected_period]
 
+st.sidebar.divider()
+st.sidebar.subheader("🤖 Auto Trade")
+auto_trade = st.sidebar.toggle("자동 거래 활성화", value=False)
+if auto_trade:
+    st.sidebar.success("✅ 자동 거래 ON")
+    st.sidebar.caption("시그널에 따라 자동 진입/청산")
+    auto_refresh = True
+else:
+    auto_refresh = st.sidebar.checkbox("🔄 Auto Refresh (60s)", value=False)
+
+st.sidebar.divider()
 if st.sidebar.button("🔄 새로고침"): st.cache_data.clear(); st.rerun()
 
 # ==============================
@@ -401,6 +415,57 @@ position = get_open_position(selected_coin)
 
 if df is not None and not df.empty:
     signal, conf, ind = get_trading_signal(df)
+    
+    # ========== AUTO TRADE 로직 ==========
+    if auto_trade and supabase:
+        trade_executed = False
+        
+        # 포지션 없을 때 - 시그널대로 진입
+        if not position and signal in ["LONG", "SHORT"] and conf >= 0.6:
+            margin = account['balance'] * 0.5  # 50% 사용
+            qty = (margin * LEVERAGE) / price
+            direction = "Long" if signal == "LONG" else "Short"
+            
+            open_position(selected_coin, direction, price, qty, margin)
+            update_balance(selected_coin, account['balance'] - margin)
+            st.toast(f"🤖 Auto: {direction} 진입 @ ${price:,.2f}")
+            trade_executed = True
+        
+        # 포지션 있을 때 - 반대 시그널이면 청산 후 새 포지션
+        elif position:
+            should_close = False
+            new_direction = None
+            
+            if position['direction'] == 'Long' and signal == "SHORT" and conf >= 0.6:
+                should_close = True
+                new_direction = "Short"
+            elif position['direction'] == 'Short' and signal == "LONG" and conf >= 0.6:
+                should_close = True
+                new_direction = "Long"
+            
+            if should_close:
+                # 기존 포지션 청산
+                pnl, roe = close_position(selected_coin, position, price)
+                margin_returned = position['entry_price'] * position['qty'] / LEVERAGE
+                new_balance = account['balance'] + margin_returned + pnl
+                update_balance(selected_coin, new_balance)
+                st.toast(f"🤖 Auto: 청산 PnL ${pnl:+,.2f}")
+                
+                # 새 포지션 진입
+                time.sleep(0.5)
+                account = get_account(selected_coin)  # 잔고 다시 조회
+                margin = account['balance'] * 0.5
+                qty = (margin * LEVERAGE) / price
+                open_position(selected_coin, new_direction, price, qty, margin)
+                update_balance(selected_coin, account['balance'] - margin)
+                st.toast(f"🤖 Auto: {new_direction} 진입 @ ${price:,.2f}")
+                trade_executed = True
+        
+        if trade_executed:
+            st.cache_data.clear()
+            time.sleep(1)
+            st.rerun()
+    # ========== AUTO TRADE 끝 ==========
     
     # 상단 메트릭
     c1, c2, c3, c4, c5 = st.columns(5)
@@ -549,3 +614,13 @@ else:
 st.divider()
 st.caption("⚠️ 모의 거래입니다. 실제 자금이 아닙니다. | Data: Yahoo Finance")
 st.sidebar.caption(f"Updated: {datetime.now().strftime('%H:%M:%S')}")
+
+# Auto Refresh
+if auto_trade:
+    st.sidebar.warning("🤖 자동 거래 모드 (30초마다 체크)")
+    time.sleep(30)
+    st.cache_data.clear()
+    st.rerun()
+elif auto_refresh:
+    time.sleep(60)
+    st.rerun()
