@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Crypto Trading Dashboard
-- CoinCap API (전세계 접속 가능, 제한 없음)
+- Yahoo Finance (yfinance) - 전세계 접속 가능
 """
 
 import time
@@ -10,7 +10,7 @@ from datetime import datetime
 
 import numpy as np
 import pandas as pd
-import requests
+import yfinance as yf
 import streamlit as st
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -51,66 +51,74 @@ st.markdown("""
 # 설정
 # ==============================
 COINS = {
-    "bitcoin": {"symbol": "BTC", "name": "Bitcoin", "icon": "₿"},
-    "ethereum": {"symbol": "ETH", "name": "Ethereum", "icon": "Ξ"},
-    "solana": {"symbol": "SOL", "name": "Solana", "icon": "◎"},
-    "xrp": {"symbol": "XRP", "name": "XRP", "icon": "✕"},
-    "dogecoin": {"symbol": "DOGE", "name": "Dogecoin", "icon": "Ð"},
-    "binance-coin": {"symbol": "BNB", "name": "BNB", "icon": "🔶"},
+    "BTC-USD": {"name": "Bitcoin", "icon": "₿"},
+    "ETH-USD": {"name": "Ethereum", "icon": "Ξ"},
+    "SOL-USD": {"name": "Solana", "icon": "◎"},
+    "XRP-USD": {"name": "XRP", "icon": "✕"},
+    "DOGE-USD": {"name": "Dogecoin", "icon": "Ð"},
+    "BNB-USD": {"name": "BNB", "icon": "🔶"},
 }
 
-COIN_IDS = list(COINS.keys())
+COIN_LIST = list(COINS.keys())
 
 # ==============================
-# CoinCap API
+# Yahoo Finance API
 # ==============================
 
-@st.cache_data(ttl=15)
+@st.cache_data(ttl=60)
 def get_all_prices():
-    """CoinCap에서 가격 조회"""
+    """Yahoo Finance에서 가격 조회"""
     try:
+        tickers = yf.Tickers(" ".join(COIN_LIST))
         prices = {}
-        for coin_id in COIN_IDS:
-            url = f"https://api.coincap.io/v2/assets/{coin_id}"
-            r = requests.get(url, timeout=10)
-            if r.status_code == 200:
-                data = r.json().get("data", {})
-                prices[coin_id] = {
-                    'price': float(data.get("priceUsd", 0)),
-                    'change': float(data.get("changePercent24Hr", 0)),
-                    'volume': float(data.get("volumeUsd24Hr", 0)),
-                    'marketCap': float(data.get("marketCapUsd", 0)),
+        
+        for symbol in COIN_LIST:
+            try:
+                ticker = tickers.tickers[symbol]
+                info = ticker.fast_info
+                hist = ticker.history(period="2d")
+                
+                if len(hist) >= 2:
+                    prev_close = hist['Close'].iloc[-2]
+                    current = hist['Close'].iloc[-1]
+                    change = ((current / prev_close) - 1) * 100
+                else:
+                    current = info.last_price if hasattr(info, 'last_price') else 0
+                    change = 0
+                
+                prices[symbol] = {
+                    'price': current,
+                    'change': change,
+                    'volume': hist['Volume'].iloc[-1] if len(hist) > 0 else 0,
                 }
+            except:
+                continue
+                
         return prices
     except Exception as e:
-        st.error(f"API Error: {e}")
+        st.error(f"Error: {e}")
         return {}
 
 
-@st.cache_data(ttl=30)
-def fetch_history(coin_id, interval="m1"):
-    """CoinCap에서 가격 히스토리 조회"""
+@st.cache_data(ttl=60)
+def fetch_history(symbol, period="1d", interval="1m"):
+    """Yahoo Finance에서 히스토리 조회"""
     try:
-        # interval: m1, m5, m15, m30, h1, h2, h6, h12, d1
-        url = f"https://api.coincap.io/v2/assets/{coin_id}/history"
-        params = {"interval": interval}
-        r = requests.get(url, params=params, timeout=10)
+        ticker = yf.Ticker(symbol)
+        df = ticker.history(period=period, interval=interval)
         
-        if r.status_code != 200:
+        if df.empty:
             return None
         
-        data = r.json().get("data", [])
-        if not data:
-            return None
+        df = df.rename(columns={
+            'Open': 'open',
+            'High': 'high', 
+            'Low': 'low',
+            'Close': 'close',
+            'Volume': 'volume'
+        })
         
-        df = pd.DataFrame(data)
-        df["time"] = pd.to_datetime(df["time"], unit="ms")
-        df["priceUsd"] = df["priceUsd"].astype(float)
-        df = df.rename(columns={"priceUsd": "close", "time": "timestamp"})
-        df = df.set_index("timestamp")
-        
-        # 최근 200개만
-        return df.tail(200)
+        return df[['open', 'high', 'low', 'close', 'volume']]
     except Exception as e:
         return None
 
@@ -178,24 +186,29 @@ st.caption("Real-time analysis • BTC, ETH, SOL, XRP, DOGE, BNB")
 
 # 사이드바
 st.sidebar.title("⚙️ Settings")
-selected_coin = st.sidebar.selectbox("📌 Coin", COIN_IDS,
+selected_coin = st.sidebar.selectbox("📌 Coin", COIN_LIST,
     format_func=lambda x: f"{COINS[x]['icon']} {COINS[x]['name']}")
-interval_map = {"1분": "m1", "5분": "m5", "15분": "m15", "1시간": "h1", "1일": "d1"}
-interval = interval_map[st.sidebar.selectbox("⏱️ Timeframe", list(interval_map.keys()))]
+
+period_map = {"1일": ("1d", "1m"), "5일": ("5d", "5m"), "1개월": ("1mo", "1h"), "3개월": ("3mo", "1d")}
+selected_period = st.sidebar.selectbox("⏱️ Period", list(period_map.keys()))
+period, interval = period_map[selected_period]
+
 show_indicators = st.sidebar.checkbox("📊 Indicators", value=True)
-auto_refresh = st.sidebar.checkbox("🔄 Auto (15s)", value=False)
+auto_refresh = st.sidebar.checkbox("🔄 Auto (60s)", value=False)
 if st.sidebar.button("🔄 Refresh"): st.cache_data.clear(); st.rerun()
 
 # 전체 현황
 st.subheader("🌐 Market Overview")
-prices = get_all_prices()
+
+with st.spinner("Loading prices..."):
+    prices = get_all_prices()
 
 if prices:
     cols = st.columns(6)
-    for i, coin_id in enumerate(COIN_IDS):
-        if coin_id in prices:
-            d = prices[coin_id]
-            info = COINS[coin_id]
+    for i, symbol in enumerate(COIN_LIST):
+        if symbol in prices:
+            d = prices[symbol]
+            info = COINS[symbol]
             with cols[i]:
                 chg = d['change']
                 st.markdown(f"""
@@ -207,8 +220,7 @@ if prices:
                 </div>
                 """, unsafe_allow_html=True)
 else:
-    st.error("❌ 데이터를 불러올 수 없습니다. 잠시 후 다시 시도해주세요.")
-    st.info("🔍 API 상태 확인 중...")
+    st.error("❌ 데이터를 불러올 수 없습니다.")
 
 st.divider()
 
@@ -216,7 +228,9 @@ st.divider()
 info = COINS[selected_coin]
 st.subheader(f"{info['icon']} {info['name']} Analysis")
 
-df = fetch_history(selected_coin, interval=interval)
+with st.spinner("Loading chart..."):
+    df = fetch_history(selected_coin, period=period, interval=interval)
+
 price = prices.get(selected_coin, {}).get('price', 0) if prices else 0
 
 if df is not None and not df.empty:
@@ -238,9 +252,9 @@ if df is not None and not df.empty:
         rows, heights = (3, [0.5,0.25,0.25]) if show_indicators else (2, [0.7,0.3])
         fig = make_subplots(rows=rows, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=heights)
         
-        # 라인 차트 (OHLC 없음)
-        fig.add_trace(go.Scatter(x=df.index, y=df['close'], mode='lines', name='Price',
-            line=dict(color='#667eea', width=2), fill='tozeroy', fillcolor='rgba(102,126,234,0.1)'), row=1, col=1)
+        # 캔들스틱
+        fig.add_trace(go.Candlestick(x=df.index, open=df['open'], high=df['high'], low=df['low'], close=df['close'],
+            increasing_line_color='#43e97b', decreasing_line_color='#f5576c', name='OHLC'), row=1, col=1)
         
         # EMA
         fig.add_trace(go.Scatter(x=df.index, y=df['close'].ewm(span=10).mean(), name='EMA10', 
@@ -253,11 +267,9 @@ if df is not None and not df.empty:
             fig.add_trace(go.Scatter(x=df.index,y=u,name='BB+',line=dict(color='rgba(255,255,255,0.3)',width=1)), row=1, col=1)
             fig.add_trace(go.Scatter(x=df.index,y=l,name='BB-',line=dict(color='rgba(255,255,255,0.3)',width=1)), row=1, col=1)
         
-        # MACD
-        macd, macd_sig = calculate_macd(df['close'])
-        macd_hist = macd - macd_sig
-        colors = ['#43e97b' if v >= 0 else '#f5576c' for v in macd_hist]
-        fig.add_trace(go.Bar(x=df.index, y=macd_hist, marker_color=colors, showlegend=False), row=2, col=1)
+        # Volume
+        colors = ['#f5576c' if df['close'].iloc[i] < df['open'].iloc[i] else '#43e97b' for i in range(len(df))]
+        fig.add_trace(go.Bar(x=df.index, y=df['volume'], marker_color=colors, showlegend=False), row=2, col=1)
         
         if show_indicators:
             fig.add_trace(go.Scatter(x=df.index, y=calculate_rsi(df['close']), name='RSI', 
@@ -317,10 +329,10 @@ with c2:
     st.markdown("""
     ### 🔗 Links
     - [GitHub](https://github.com/gyyi0718/crypto-dashboard)
-    - Data: [CoinCap API](https://coincap.io/)
+    - Data: Yahoo Finance
     """)
 
 st.sidebar.divider()
 st.sidebar.caption(f"Updated: {datetime.now().strftime('%H:%M:%S')}")
 
-if auto_refresh: time.sleep(15); st.rerun()
+if auto_refresh: time.sleep(60); st.rerun()
