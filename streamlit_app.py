@@ -66,7 +66,7 @@ COIN_IDS = list(COINS.keys())
 # API 함수
 # ==============================
 
-@st.cache_data(ttl=30)
+@st.cache_data(ttl=120)
 def get_all_prices():
     """CoinGecko에서 모든 코인 가격 조회"""
     try:
@@ -78,7 +78,13 @@ def get_all_prices():
             "include_24hr_change": "true",
             "include_24hr_vol": "true",
         }
-        r = requests.get(url, params=params, timeout=10)
+        headers = {"Accept": "application/json"}
+        r = requests.get(url, params=params, headers=headers, timeout=15)
+        
+        if r.status_code == 429:
+            st.warning("⏳ API 요청 제한. 2분 후 자동 갱신됩니다.")
+            return None
+        
         r.raise_for_status()
         data = r.json()
         
@@ -93,17 +99,21 @@ def get_all_prices():
                 }
         return prices
     except Exception as e:
-        st.error(f"가격 조회 실패: {e}")
-        return {}
+        return None
 
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=300)
 def fetch_ohlc(coin_id, days=1):
     """CoinGecko에서 OHLC 데이터 조회"""
     try:
         url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/ohlc"
         params = {"vs_currency": "usd", "days": days}
-        r = requests.get(url, params=params, timeout=10)
+        headers = {"Accept": "application/json"}
+        r = requests.get(url, params=params, headers=headers, timeout=15)
+        
+        if r.status_code == 429:
+            return None
+            
         r.raise_for_status()
         data = r.json()
         
@@ -118,13 +128,18 @@ def fetch_ohlc(coin_id, days=1):
         return None
 
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=300)
 def fetch_market_chart(coin_id, days=1):
     """CoinGecko에서 가격 히스토리 조회"""
     try:
         url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart"
         params = {"vs_currency": "usd", "days": days}
-        r = requests.get(url, params=params, timeout=10)
+        headers = {"Accept": "application/json"}
+        r = requests.get(url, params=params, headers=headers, timeout=15)
+        
+        if r.status_code == 429:
+            return None
+            
         r.raise_for_status()
         data = r.json()
         
@@ -231,7 +246,7 @@ selected_coin = st.sidebar.selectbox(
 )
 chart_days = st.sidebar.selectbox("📅 Chart Period", [1, 7, 14, 30], index=0, format_func=lambda x: f"{x} day(s)")
 show_indicators = st.sidebar.checkbox("📊 Show Indicators", value=True)
-auto_refresh = st.sidebar.checkbox("🔄 Auto Refresh (30s)", value=False)
+auto_refresh = st.sidebar.checkbox("🔄 Auto Refresh (60s)", value=False)
 
 if st.sidebar.button("🔄 Refresh Now"):
     st.cache_data.clear()
@@ -264,7 +279,10 @@ if prices:
                 </div>
                 """, unsafe_allow_html=True)
 else:
-    st.warning("가격 데이터를 불러오는 중...")
+    st.info("⏳ 가격 데이터 로딩 중... 잠시만 기다려주세요. (API 제한으로 2분 캐시)")
+    if st.button("🔄 새로고침"):
+        st.cache_data.clear()
+        st.rerun()
 
 st.divider()
 
@@ -450,8 +468,8 @@ with col2:
 
 st.sidebar.divider()
 st.sidebar.caption(f"Updated: {datetime.now().strftime('%H:%M:%S')}")
-st.sidebar.caption("📊 Data: CoinGecko (Free API)")
+st.sidebar.caption("📊 CoinGecko Free API (2분 캐시)")
 
 if auto_refresh:
-    time.sleep(30)
+    time.sleep(60)
     st.rerun()
