@@ -1,10 +1,9 @@
-# 📈 Crypto Trading Dashboard
+# 📈 Crypto Paper Trading Dashboard
 
-Real-time cryptocurrency analysis dashboard with technical indicators.
+Real-time cryptocurrency paper trading with persistent storage.
 
-![Dashboard Preview](https://img.shields.io/badge/Streamlit-Live-brightgreen)
+![Streamlit](https://img.shields.io/badge/Streamlit-Live-brightgreen)
 ![Python](https://img.shields.io/badge/Python-3.9+-blue)
-![License](https://img.shields.io/badge/License-MIT-yellow)
 
 ## 🌐 Live Demo
 
@@ -12,98 +11,67 @@ Real-time cryptocurrency analysis dashboard with technical indicators.
 
 ## ✨ Features
 
-- **Real-time Price Tracking**: BTC, ETH, SOL, XRP, DOGE, BNB
-- **Technical Indicators**:
-  - RSI (Relative Strength Index)
-  - MACD (Moving Average Convergence Divergence)
-  - EMA (10/30 period)
-  - Bollinger Bands
-- **Trading Signals**: Automated buy/sell signal generation
-- **Interactive Charts**: Candlestick, volume, indicators
-- **Auto Refresh**: Real-time updates every 10 seconds
+- **Real-time Price**: BTC, ETH, SOL, XRP, DOGE, BNB (Yahoo Finance)
+- **Paper Trading**: Long/Short positions with leverage
+- **PnL Tracking**: Realized & unrealized profit/loss
+- **Persistent Storage**: Trade history saved to Supabase
+- **Technical Indicators**: RSI, MACD, EMA
+- **AI Signals**: Automated buy/sell recommendations
 
-## 📸 Screenshots
+## 🚀 Setup
 
-| Market Overview | Technical Analysis |
-|:---:|:---:|
-| 6개 심볼 실시간 가격 | 캔들차트 + 지표 |
+### 1. Supabase Setup
 
-## 🚀 Quick Start
+1. Create account at [supabase.com](https://supabase.com)
+2. Create new project
+3. Go to SQL Editor and run `supabase_setup.sql`
+4. Get API keys from Project Settings → API
 
-### Local Development
-
-```bash
-# Clone repository
-git clone https://github.com/your-username/crypto-dashboard.git
-cd crypto-dashboard
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Run app
-streamlit run streamlit_app.py
-```
-
-Open http://localhost:8501
-
-### Deploy to Streamlit Cloud
+### 2. Streamlit Cloud Deployment
 
 1. Fork this repository
 2. Go to [share.streamlit.io](https://share.streamlit.io)
-3. Connect your GitHub account
-4. Select this repo → Deploy
+3. Deploy this repo
+4. Add Secrets:
 
-## 📊 Technical Indicators
-
-| Indicator | Description | Signal |
-|-----------|-------------|--------|
-| **RSI** | Relative Strength Index | < 30: Oversold (Buy), > 70: Overbought (Sell) |
-| **MACD** | Trend Momentum | Bullish/Bearish crossover |
-| **EMA** | Exponential Moving Average | 10 > 30: Uptrend, 10 < 30: Downtrend |
-| **Bollinger** | Volatility Bands | Position within bands |
-
-## 🔧 Configuration
-
-Edit `streamlit_app.py`:
-
-```python
-SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", ...]  # Add/remove symbols
+```toml
+SUPABASE_URL = "https://xxxxx.supabase.co"
+SUPABASE_KEY = "eyJxxxx..."
 ```
 
-## 📁 Project Structure
+### 3. Local Development
+
+```bash
+# Clone
+git clone https://github.com/your-username/crypto-dashboard.git
+cd crypto-dashboard
+
+# Install
+pip install -r requirements.txt
+
+# Create .env or .streamlit/secrets.toml
+# Add SUPABASE_URL and SUPABASE_KEY
+
+# Run
+streamlit run streamlit_app.py
+```
+
+## 📁 Files
 
 ```
-crypto-dashboard/
-├── streamlit_app.py     # Main application
-├── requirements.txt     # Dependencies
-└── README.md           # This file
+├── streamlit_app.py      # Main app
+├── requirements.txt      # Dependencies
+├── supabase_setup.sql    # Database schema
+└── README.md
 ```
-
-## 🛠️ Tech Stack
-
-- **Frontend**: Streamlit
-- **Charts**: Plotly
-- **Data**: Binance Futures API
-- **Hosting**: Streamlit Cloud (Free)
 
 ## ⚠️ Disclaimer
 
-This dashboard is for **educational purposes only**. 
-
-- Not financial advice
-- Do your own research (DYOR)
-- Never invest more than you can afford to lose
-
-## 📝 License
-
-MIT License - feel free to use for any purpose.
+This is **paper trading** for educational purposes only.
+Not financial advice. No real money involved.
 
 ## 🔗 Links
 
-- [Portfolio](https://your-portfolio.com)
-- [Binance API Docs](https://binance-docs.github.io/apidocs/)
-- [Streamlit Docs](https://docs.streamlit.io/)
-
----
-
-Made with ❤️ by [Your Name](https://github.com/your-username)
+- Data: [Yahoo Finance](https://finance.yahoo.com/)
+- Database: [Supabase](https://supabase.com/)
+- Hosting: [Streamlit Cloud](https://streamlit.io/cloud)
