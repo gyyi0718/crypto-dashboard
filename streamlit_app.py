@@ -1,0 +1,389 @@
+# streamlit_app.py
+# -*- coding: utf-8 -*-
+"""
+N-BEATS Crypto Trading Dashboard
+- Streamlit Cloud 배포용
+- 실시간 가격/차트 + 기술적 지표
+"""
+
+import time
+from datetime import datetime
+
+import numpy as np
+import pandas as pd
+import requests
+import streamlit as st
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+
+# ==============================
+# 페이지 설정
+# ==============================
+st.set_page_config(
+    page_title="Crypto Trading Dashboard",
+    page_icon="📈",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# 다크 테마 CSS
+st.markdown("""
+<style>
+    .metric-card {
+        background: linear-gradient(135deg, rgba(102,126,234,0.1) 0%, rgba(118,75,162,0.1) 100%);
+        border: 1px solid rgba(102,126,234,0.2);
+        border-radius: 12px;
+        padding: 16px;
+        text-align: center;
+        margin-bottom: 8px;
+    }
+    .profit { color: #43e97b !important; }
+    .loss { color: #f5576c !important; }
+    .signal-box {
+        border-radius: 12px;
+        padding: 20px;
+        text-align: center;
+        margin: 10px 0;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# ==============================
+# 설정
+# ==============================
+SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT", "BNBUSDT"]
+SYMBOL_NAMES = {
+    "BTCUSDT": "Bitcoin", "ETHUSDT": "Ethereum", "SOLUSDT": "Solana",
+    "XRPUSDT": "XRP", "DOGEUSDT": "Dogecoin", "BNBUSDT": "BNB"
+}
+SYMBOL_ICONS = {
+    "BTCUSDT": "₿", "ETHUSDT": "Ξ", "SOLUSDT": "◎",
+    "XRPUSDT": "✕", "DOGEUSDT": "Ð", "BNBUSDT": "🔶"
+}
+
+# ==============================
+# 데이터 함수
+# ==============================
+
+@st.cache_data(ttl=5)
+def get_all_prices():
+    """모든 심볼 현재가 조회"""
+    try:
+        url = "https://fapi.binance.com/fapi/v1/ticker/24hr"
+        r = requests.get(url, timeout=10)
+        data = r.json()
+        
+        prices = {}
+        for item in data:
+            if item['symbol'] in SYMBOLS:
+                prices[item['symbol']] = {
+                    'price': float(item['lastPrice']),
+                    'change': float(item['priceChangePercent']),
+                    'high': float(item['highPrice']),
+                    'low': float(item['lowPrice']),
+                    'volume': float(item['quoteVolume'])
+                }
+        return prices
+    except Exception as e:
+        return {}
+
+
+@st.cache_data(ttl=10)
+def fetch_klines(symbol, interval="1m", limit=200):
+    """캔들 데이터 조회"""
+    try:
+        url = "https://fapi.binance.com/fapi/v1/klines"
+        params = {"symbol": symbol, "interval": interval, "limit": limit}
+        r = requests.get(url, params=params, timeout=10)
+        data = r.json()
+        
+        df = pd.DataFrame(data, columns=[
+            "open_time", "open", "high", "low", "close", "volume",
+            "close_time", "qv", "n", "tb", "tq", "ignore",
+        ])
+        df["open_time"] = pd.to_datetime(df["open_time"], unit="ms")
+        df[["open", "high", "low", "close", "volume"]] = \
+            df[["open", "high", "low", "close", "volume"]].astype(float)
+        df = df.set_index("open_time")
+        return df[["open", "high", "low", "close", "volume"]]
+    except:
+        return None
+
+
+def calculate_rsi(prices, period=14):
+    delta = prices.diff()
+    gain = delta.where(delta > 0, 0).rolling(window=period).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+    rs = gain / loss
+    return 100 - (100 / (1 + rs))
+
+
+def calculate_macd(prices, fast=12, slow=26, signal=9):
+    ema_fast = prices.ewm(span=fast).mean()
+    ema_slow = prices.ewm(span=slow).mean()
+    macd = ema_fast - ema_slow
+    macd_signal = macd.ewm(span=signal).mean()
+    return macd, macd_signal, macd - macd_signal
+
+
+def calculate_bollinger(prices, period=20, std=2):
+    sma = prices.rolling(window=period).mean()
+    std_dev = prices.rolling(window=period).std()
+    return sma + (std_dev * std), sma, sma - (std_dev * std)
+
+
+def get_trading_signal(df):
+    """트레이딩 시그널 생성"""
+    if df is None or len(df) < 30:
+        return "HOLD", 0.5, {}
+    
+    close = df['close']
+    rsi = calculate_rsi(close).iloc[-1]
+    macd, macd_signal, _ = calculate_macd(close)
+    macd_cross = macd.iloc[-1] - macd_signal.iloc[-1]
+    ema_short = close.ewm(span=10).mean().iloc[-1]
+    ema_long = close.ewm(span=30).mean().iloc[-1]
+    ema_trend = "UP" if ema_short > ema_long else "DOWN"
+    
+    score = 0
+    if rsi < 30: score += 2
+    elif rsi > 70: score -= 2
+    elif rsi < 45: score += 1
+    elif rsi > 55: score -= 1
+    
+    if macd_cross > 0: score += 1
+    else: score -= 1
+    
+    if ema_trend == "UP": score += 1
+    else: score -= 1
+    
+    if score >= 2:
+        signal, confidence = "LONG", min(0.5 + score * 0.1, 0.9)
+    elif score <= -2:
+        signal, confidence = "SHORT", min(0.5 + abs(score) * 0.1, 0.9)
+    else:
+        signal, confidence = "HOLD", 0.5
+    
+    return signal, confidence, {'rsi': rsi, 'macd_cross': macd_cross, 'ema_trend': ema_trend, 'score': score}
+
+
+# ==============================
+# 메인 UI
+# ==============================
+
+st.title("📈 Crypto Trading Dashboard")
+st.caption("Real-time cryptocurrency analysis • BTC, ETH, SOL, XRP, DOGE, BNB")
+
+# 사이드바
+st.sidebar.title("⚙️ Settings")
+selected_symbol = st.sidebar.selectbox(
+    "📌 Symbol", SYMBOLS,
+    format_func=lambda x: f"{SYMBOL_ICONS.get(x, '')} {SYMBOL_NAMES.get(x, x)}"
+)
+timeframe = st.sidebar.selectbox("⏱️ Timeframe", ["1m", "5m", "15m", "1h", "4h"], index=0)
+show_indicators = st.sidebar.checkbox("📊 Show Indicators", value=True)
+auto_refresh = st.sidebar.checkbox("🔄 Auto Refresh (10s)", value=False)
+
+if st.sidebar.button("🔄 Refresh Now"):
+    st.cache_data.clear()
+    st.rerun()
+
+# ==============================
+# 전체 심볼 현황
+# ==============================
+
+st.subheader("🌐 Market Overview")
+prices = get_all_prices()
+
+if prices:
+    cols = st.columns(6)
+    for i, symbol in enumerate(SYMBOLS):
+        if symbol in prices:
+            data = prices[symbol]
+            with cols[i]:
+                change_color = "profit" if data['change'] >= 0 else "loss"
+                change_icon = "▲" if data['change'] >= 0 else "▼"
+                
+                st.markdown(f"""
+                <div class="metric-card">
+                    <div style="font-size: 20px;">{SYMBOL_ICONS.get(symbol, '')}</div>
+                    <div style="font-size: 11px; color: #888;">{SYMBOL_NAMES.get(symbol, symbol)}</div>
+                    <div style="font-size: 16px; font-weight: bold; color: #fff;">${data['price']:,.4f}</div>
+                    <div class="{change_color}">{change_icon} {data['change']:+.2f}%</div>
+                </div>
+                """, unsafe_allow_html=True)
+
+st.divider()
+
+# ==============================
+# 선택 심볼 상세
+# ==============================
+
+st.subheader(f"{SYMBOL_ICONS.get(selected_symbol, '')} {SYMBOL_NAMES.get(selected_symbol, selected_symbol)} Analysis")
+
+df = fetch_klines(selected_symbol, timeframe, limit=200)
+current_price = prices.get(selected_symbol, {}).get('price', 0)
+
+if df is not None and not df.empty:
+    signal, confidence, indicators = get_trading_signal(df)
+    
+    # 메트릭
+    col1, col2, col3, col4, col5 = st.columns(5)
+    
+    with col1:
+        change = prices.get(selected_symbol, {}).get('change', 0)
+        st.metric("💰 Price", f"${current_price:,.4f}", f"{change:+.2f}%")
+    
+    with col2:
+        sig_icon = {"LONG": "🟢", "SHORT": "🔴", "HOLD": "⚪"}.get(signal, "⚪")
+        st.metric(f"{sig_icon} Signal", signal, f"{confidence*100:.0f}%")
+    
+    with col3:
+        rsi = indicators.get('rsi', 50)
+        rsi_status = "Oversold" if rsi < 30 else "Overbought" if rsi > 70 else "Neutral"
+        st.metric("📊 RSI", f"{rsi:.1f}", rsi_status)
+    
+    with col4:
+        st.metric("📈 Trend", indicators.get('ema_trend', 'N/A'))
+    
+    with col5:
+        vol = prices.get(selected_symbol, {}).get('volume', 0)
+        st.metric("📊 24h Vol", f"${vol/1e6:.1f}M")
+    
+    st.divider()
+    
+    # 차트 & 지표
+    col_chart, col_ind = st.columns([2, 1])
+    
+    with col_chart:
+        rows = 3 if show_indicators else 2
+        heights = [0.5, 0.25, 0.25] if show_indicators else [0.7, 0.3]
+        titles = ("Price", "Volume", "RSI") if show_indicators else ("Price", "Volume")
+        
+        fig = make_subplots(rows=rows, cols=1, shared_xaxes=True, vertical_spacing=0.05,
+                           row_heights=heights, subplot_titles=titles)
+        
+        # 캔들스틱
+        fig.add_trace(go.Candlestick(
+            x=df.index, open=df['open'], high=df['high'], low=df['low'], close=df['close'],
+            name='OHLC', increasing_line_color='#43e97b', decreasing_line_color='#f5576c'
+        ), row=1, col=1)
+        
+        # EMA
+        fig.add_trace(go.Scatter(x=df.index, y=df['close'].ewm(span=10).mean(),
+                                name='EMA 10', line=dict(color='#4facfe', width=1)), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df.index, y=df['close'].ewm(span=30).mean(),
+                                name='EMA 30', line=dict(color='#f093fb', width=1)), row=1, col=1)
+        
+        if show_indicators:
+            upper, middle, lower = calculate_bollinger(df['close'])
+            fig.add_trace(go.Scatter(x=df.index, y=upper, name='BB Upper',
+                                    line=dict(color='rgba(255,255,255,0.2)', width=1)), row=1, col=1)
+            fig.add_trace(go.Scatter(x=df.index, y=lower, name='BB Lower',
+                                    line=dict(color='rgba(255,255,255,0.2)', width=1),
+                                    fill='tonexty', fillcolor='rgba(102,126,234,0.05)'), row=1, col=1)
+        
+        # 거래량
+        colors = ['#f5576c' if df['close'].iloc[i] < df['open'].iloc[i] else '#43e97b' for i in range(len(df))]
+        fig.add_trace(go.Bar(x=df.index, y=df['volume'], marker_color=colors, showlegend=False), row=2, col=1)
+        
+        if show_indicators:
+            rsi_series = calculate_rsi(df['close'])
+            fig.add_trace(go.Scatter(x=df.index, y=rsi_series, name='RSI',
+                                    line=dict(color='#667eea', width=2)), row=3, col=1)
+            fig.add_hline(y=70, line_dash="dot", line_color="red", row=3, col=1)
+            fig.add_hline(y=30, line_dash="dot", line_color="green", row=3, col=1)
+        
+        fig.update_layout(
+            height=550 if show_indicators else 400,
+            template='plotly_dark',
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            xaxis_rangeslider_visible=False,
+            showlegend=True,
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0.5, xanchor="center")
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    
+    with col_ind:
+        st.markdown("### 📊 Indicators")
+        
+        # RSI
+        st.markdown("**RSI (14)**")
+        rsi_val = indicators.get('rsi', 50)
+        st.progress(min(int(rsi_val), 100))
+        st.caption(f"{rsi_val:.1f} - {'Oversold' if rsi_val < 30 else 'Overbought' if rsi_val > 70 else 'Neutral'}")
+        
+        st.divider()
+        
+        # MACD
+        st.markdown("**MACD**")
+        macd, macd_sig, _ = calculate_macd(df['close'])
+        macd_status = "🟢 Bullish" if macd.iloc[-1] > macd_sig.iloc[-1] else "🔴 Bearish"
+        st.write(f"Status: {macd_status}")
+        st.write(f"MACD: {macd.iloc[-1]:.4f}")
+        st.write(f"Signal: {macd_sig.iloc[-1]:.4f}")
+        
+        st.divider()
+        
+        # 볼린저
+        st.markdown("**Bollinger Position**")
+        upper, _, lower = calculate_bollinger(df['close'])
+        bb_pos = (current_price - lower.iloc[-1]) / (upper.iloc[-1] - lower.iloc[-1])
+        bb_pos = max(0, min(1, bb_pos))
+        st.progress(bb_pos)
+        st.caption(f"{bb_pos*100:.0f}% (0=Lower, 100=Upper)")
+        
+        st.divider()
+        
+        # 시그널 박스
+        st.markdown("### 🎯 Signal")
+        sig_bg = {"LONG": "rgba(67,233,123,0.2)", "SHORT": "rgba(245,87,108,0.2)", "HOLD": "rgba(102,126,234,0.2)"}
+        sig_icon = {"LONG": "🟢", "SHORT": "🔴", "HOLD": "⚪"}
+        
+        st.markdown(f"""
+        <div class="signal-box" style="background: {sig_bg.get(signal, sig_bg['HOLD'])}">
+            <div style="font-size: 28px;">{sig_icon.get(signal, '⚪')}</div>
+            <div style="font-size: 22px; font-weight: bold; color: #fff;">{signal}</div>
+            <div style="font-size: 13px; color: #888;">Confidence: {confidence*100:.0f}%</div>
+            <div style="font-size: 11px; color: #666; margin-top: 8px;">Score: {indicators.get('score', 0)}</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+else:
+    st.error("데이터를 불러올 수 없습니다.")
+
+# ==============================
+# 하단
+# ==============================
+
+st.divider()
+
+col1, col2 = st.columns(2)
+
+with col1:
+    st.markdown("### ℹ️ About")
+    st.markdown("""
+    Real-time crypto analysis using technical indicators:
+    - **RSI**: Oversold < 30, Overbought > 70
+    - **MACD**: Trend momentum
+    - **EMA**: 10/30 period crossover
+    - **Bollinger Bands**: Volatility
+    
+    ⚠️ Educational purposes only. Not financial advice.
+    """)
+
+with col2:
+    st.markdown("### 🔗 Links")
+    st.markdown("""
+    - 📂 [GitHub Repository](https://github.com/your-username/crypto-dashboard)
+    - 🌐 [Portfolio](https://your-portfolio.com)
+    - 📊 Data: Binance Futures API
+    """)
+
+st.sidebar.divider()
+st.sidebar.caption(f"Updated: {datetime.now().strftime('%H:%M:%S')}")
+
+if auto_refresh:
+    time.sleep(10)
+    st.rerun()
