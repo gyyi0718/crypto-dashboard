@@ -306,6 +306,7 @@ def get_trading_signal(df):
 # ==============================
 # UI
 # ==============================
+auto_trade = st.sidebar.toggle("자동 거래 활성화", value=False)
 
 st.title("📈 Crypto Paper Trading")
 if auto_trade:
@@ -328,7 +329,6 @@ period, interval = period_map[selected_period]
 
 st.sidebar.divider()
 st.sidebar.subheader("🤖 Auto Trade")
-auto_trade = st.sidebar.toggle("자동 거래 활성화", value=False)
 if auto_trade:
     st.sidebar.success("✅ 자동 거래 ON")
     st.sidebar.caption("시그널에 따라 자동 진입/청산")
