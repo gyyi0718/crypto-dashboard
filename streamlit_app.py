@@ -83,7 +83,7 @@ COINS = {
 
 COIN_LIST = list(COINS.keys())
 INITIAL_BALANCE = 1000
-LEVERAGE = 10
+LEVERAGE = 20
 
 # ==============================
 # Supabase 함수
