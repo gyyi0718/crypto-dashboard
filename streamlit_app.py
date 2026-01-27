@@ -77,12 +77,10 @@ COINS = {
     "ETH-USD": {"name": "Ethereum", "icon": "Ξ"},
     "SOL-USD": {"name": "Solana", "icon": "◎"},
     "XRP-USD": {"name": "XRP", "icon": "✕"},
-    "DOGE-USD": {"name": "Dogecoin", "icon": "Ð"},
-    "BNB-USD": {"name": "BNB", "icon": "🔶"},
 }
 
 COIN_LIST = list(COINS.keys())
-INITIAL_BALANCE = 1000
+INITIAL_BALANCE = 10000
 LEVERAGE = 20
 
 # ==============================
