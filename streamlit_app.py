@@ -181,6 +181,24 @@ def get_trade_history(symbol, limit=20):
         return []
 
 
+def reset_all_data():
+    """모든 데이터 초기화 (잔고 + 거래내역)"""
+    if not supabase:
+        return False
+    try:
+        # 모든 거래 내역 삭제
+        for symbol in COIN_LIST:
+            supabase.table("trades").delete().eq("symbol", symbol).execute()
+            # 잔고 초기화
+            supabase.table("accounts").update({
+                "balance": INITIAL_BALANCE
+            }).eq("symbol", symbol).execute()
+        return True
+    except Exception as e:
+        st.error(f"초기화 실패: {e}")
+        return False
+
+
 def get_all_stats():
     """전체 통계"""
     if not supabase:
@@ -320,6 +338,18 @@ if not supabase:
 st.sidebar.title("⚙️ Settings")
 selected_coin = st.sidebar.selectbox("📌 Coin", COIN_LIST,
     format_func=lambda x: f"{COINS[x]['icon']} {COINS[x]['name']}")
+
+# 데이터 초기화 섹션
+st.sidebar.divider()
+st.sidebar.subheader("🔄 데이터 초기화")
+if st.sidebar.button("🗑️ 잔고 & PnL 전체 초기화", type="secondary", use_container_width=True):
+    if reset_all_data():
+        st.sidebar.success("✅ 초기화 완료!")
+        st.cache_data.clear()
+        time.sleep(1)
+        st.rerun()
+st.sidebar.caption("모든 코인의 잔고를 $10,000로 리셋하고 거래내역을 삭제합니다.")
+st.sidebar.divider()
 
 period_map = {"1일": ("1d", "1m"), "5일": ("5d", "5m"), "1개월": ("1mo", "1h")}
 selected_period = st.sidebar.selectbox("⏱️ Period", list(period_map.keys()))
